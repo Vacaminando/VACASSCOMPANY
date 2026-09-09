@@ -1,0 +1,26 @@
+/* Estilos personalizados adicionales */
+
+/* Animación ligera para tarjetas y botones */
+button, input, select, textarea {
+  transition: all 0.2s ease-in-out;
+}
+
+/* Ocultar elementos innecesarios al exportar/imprimir a PDF */
+@media print {
+  header, 
+  .filter-badge, 
+  #btnOpenWizard, 
+  #btnExportPDF, 
+  #btnDeleteSelected, 
+  #searchInput, 
+  label[for="excelInput"] {
+    display: none !important;
+  }
+}
+
+/* Indicador activo para badges de filtro */
+.filter-badge.active {
+  background-color: #0f172a !important; /* Tailwind slate-900 */
+  color: #ffffff !important;
+  font-weight: 700;
+}
