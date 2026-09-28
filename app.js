@@ -254,6 +254,7 @@ document.getElementById("btnSaveQuickEdit").onclick = async () => {
 };
 
 // === EDICIÓN DE DATOS GENERALES DEL CLIENTE ===
+
 const editDataModal = document.getElementById("editDataModal");
 document.getElementById("btnCloseEditData").onclick = () => editDataModal.classList.add("hidden");
 
@@ -265,6 +266,10 @@ function openEditDataModal(id) {
   document.getElementById("editDataNit").value = rec.nit || "";
   document.getElementById("editDataName").value = rec.nombre || "";
   document.getElementById("editDataType").value = rec.tipo || "NORMAL";
+  
+  // Carga la observación actual en el cuadro de texto
+  document.getElementById("editDataObs").value = rec.observaciones || "";
+  
   editDataModal.classList.remove("hidden");
 }
 
@@ -273,6 +278,7 @@ document.getElementById("btnSaveDataEdit").onclick = async () => {
   const newNit = document.getElementById("editDataNit").value.trim();
   const newName = document.getElementById("editDataName").value.trim();
   const newType = document.getElementById("editDataType").value;
+  const newObs = document.getElementById("editDataObs").value.trim();
 
   if(!newNit || !newName) return alert("El NIT y el Nombre son requeridos");
 
@@ -280,6 +286,7 @@ document.getElementById("btnSaveDataEdit").onclick = async () => {
     nit: newNit,
     nombre: newName,
     tipo: newType,
+    observaciones: newObs, // Guarda la nueva observación en Firebase
     ultimaModificacion: new Date().toISOString()
   });
 
