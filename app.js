@@ -68,7 +68,36 @@ function renderTable() {
       .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remueve tildes (á -> a, é -> e)
       .replace(/[^a-z0-9]/g, ""); // Remueve TODO lo que no sea letra o número (puntos, comas, espacios, etc.)
   };
+// Limpieza inteligente para NITs pegados sin guión
+  const cleanNit = (nit) => {
+    if (!nit) return "";
+    let str = nit.toString().trim();
+    
+    // Si por alguna razón viniera con guión, tomar lo que está antes del guión
+    if (str.includes("-")) {
+      str = str.split("-")[0];
+    }
+    
+    // Dejar únicamente dígitos
+    const onlyDigits = str.replace(/\D/g, "");
 
+    // 1. NIT de empresa con DV pegado (10 dígitos: ej. 9001234561 -> 900123456)
+    if (onlyDigits.length === 10) {
+      return onlyDigits.substring(0, 9);
+    }
+
+    // 2. Cédula/NIT antiguo con DV pegado (9 dígitos de los cuales el último es DV -> 8 dígitos base)
+    // O NIT de empresa sin DV de 9 dígitos (ej. 900123456)
+    // Nota: Si el NIT tiene 9 dígitos y empieza por 8 o 9 (NITs de empresas Dian), son los 9 dígitos completos.
+    if (onlyDigits.length === 9) {
+      if (onlyDigits.startsWith("8") || onlyDigits.startsWith("9")) {
+        return onlyDigits; // Es un NIT base de empresa completo de 9 dígitos
+      }
+      return onlyDigits.substring(0, 8); // Es una cédula/NIT persona natural con DV al final
+    }
+
+    return onlyDigits;
+  };
   // 1. Mapeo de NITs repetidos (ignorando puntos y guiones para que coincidan perfectamente)
   const nitCounts = {};
   allRecords.forEach(r => {
