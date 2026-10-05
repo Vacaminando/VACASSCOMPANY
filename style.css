@@ -1,11 +1,10 @@
 /* Estilos personalizados adicionales */
 
-/* Animación ligera para tarjetas y botones */
 button, input, select, textarea {
   transition: all 0.2s ease-in-out;
 }
 
-/* Ocultar elementos innecesarios al exportar/imprimir a PDF */
+/* Ocultar elementos innecesarios y mantener colores al exportar/imprimir a PDF */
 @media print {
   header, 
   .filter-badge, 
@@ -13,8 +12,14 @@ button, input, select, textarea {
   #btnExportPDF, 
   #btnDeleteSelected, 
   #searchInput, 
+  #sortOrder,
   label[for="excelInput"] {
     display: none !important;
+  }
+
+  body {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 
