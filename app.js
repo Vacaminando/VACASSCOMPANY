@@ -60,13 +60,13 @@ function renderTable() {
   const searchVal = document.getElementById("searchInput").value.toLowerCase();
   tbody.innerHTML = "";
 
-  // Función auxiliar para limpiar puntos, guiones y espacios extras al comparar/ordenar
+  // Función auxiliar para limpiar puntos, comas, guiones, espacios y tildes al comparar/ordenar
   const cleanString = (str) => {
     return (str || "")
       .toString()
       .toLowerCase()
-      .replace(/[\.\-]/g, "") // Elimina puntos y guiones
-      .trim();
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remueve tildes (á -> a, é -> e)
+      .replace(/[^a-z0-9]/g, ""); // Remueve TODO lo que no sea letra o número (puntos, comas, espacios, etc.)
   };
 
   // 1. Mapeo de NITs repetidos (ignorando puntos y guiones para que coincidan perfectamente)
