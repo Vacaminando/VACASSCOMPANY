@@ -60,11 +60,20 @@ function renderTable() {
   const searchVal = document.getElementById("searchInput").value.toLowerCase();
   tbody.innerHTML = "";
 
-  // 1. Mapeo de NITs repetidos para marcar duplicados con un color
+  // Función auxiliar para limpiar puntos, guiones y espacios extras al comparar/ordenar
+  const cleanString = (str) => {
+    return (str || "")
+      .toString()
+      .toLowerCase()
+      .replace(/[\.\-]/g, "") // Elimina puntos y guiones
+      .trim();
+  };
+
+  // 1. Mapeo de NITs repetidos (ignorando puntos y guiones para que coincidan perfectamente)
   const nitCounts = {};
   allRecords.forEach(r => {
-    const nitClean = (r.nit || "").trim().toLowerCase();
-    if (nitClean && nitClean !== "s/n") {
+    const nitClean = cleanString(r.nit);
+    if (nitClean && nitClean !== "sn") {
       nitCounts[nitClean] = (nitCounts[nitClean] || 0) + 1;
     }
   });
@@ -77,10 +86,10 @@ function renderTable() {
     return matchesSearch && matchesEstado && matchesUbicacion;
   });
 
-  // 3. Ordenamiento (Alfabético / Fecha)
+  // 3. Ordenamiento alfabético inteligente (sin considerar puntos al comparar)
   filtered.sort((a, b) => {
-    const nameA = (a.nombre || "").toLowerCase();
-    const nameB = (b.nombre || "").toLowerCase();
+    const nameA = cleanString(a.nombre);
+    const nameB = cleanString(b.nombre);
     const dateA = a.fechaCreacion || "";
     const dateB = b.fechaCreacion || "";
 
@@ -100,8 +109,8 @@ function renderTable() {
   filtered.forEach(r => {
     const tr = document.createElement("tr");
 
-    // Verificar si el archivo es repetido (NIT duplicado)
-    const nitClean = (r.nit || "").trim().toLowerCase();
+    // Verificar si el archivo es repetido evaluando el NIT limpio
+    const nitClean = cleanString(r.nit);
     const isDuplicate = nitCounts[nitClean] > 1;
 
     // Resaltar en amarillo claro si está repetido
