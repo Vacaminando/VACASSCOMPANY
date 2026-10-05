@@ -31,6 +31,7 @@ enableIndexedDbPersistence(db).catch(err => console.warn("Offline warning:", err
 let allRecords = [];
 let currentFilterEstado = "TODOS";
 let currentFilterUbicacion = "TODOS";
+let currentSortOrder = "FECHA_ASC";
 let activeQuickEditId = null;
 let activeDataEditId = null;
 let selectedRecordIds = new Set();
@@ -44,7 +45,7 @@ let wizardData = {
   observaciones: ""
 };
 
-// Cargar registros ordenados cronológicamente por fecha de creación
+// Cargar registros ordenados por fecha de creación por defecto
 const q = query(collection(db, "expedientes"), orderBy("fechaCreacion", "asc"));
 onSnapshot(q, (snapshot) => {
   allRecords = [];
@@ -59,27 +60,69 @@ function renderTable() {
   const searchVal = document.getElementById("searchInput").value.toLowerCase();
   tbody.innerHTML = "";
 
-  const filtered = allRecords.filter(r => {
+  // 1. Mapeo de NITs repetidos para marcar duplicados con un color
+  const nitCounts = {};
+  allRecords.forEach(r => {
+    const nitClean = (r.nit || "").trim().toLowerCase();
+    if (nitClean && nitClean !== "s/n") {
+      nitCounts[nitClean] = (nitCounts[nitClean] || 0) + 1;
+    }
+  });
+
+  // 2. Filtrado
+  let filtered = allRecords.filter(r => {
     const matchesSearch = (r.nit || "").toLowerCase().includes(searchVal) || (r.nombre || "").toLowerCase().includes(searchVal);
     const matchesEstado = currentFilterEstado === "TODOS" || r.estado === currentFilterEstado;
     const matchesUbicacion = currentFilterUbicacion === "TODOS" || r.ubicacion === currentFilterUbicacion;
     return matchesSearch && matchesEstado && matchesUbicacion;
   });
 
+  // 3. Ordenamiento (Alfabético / Fecha)
+  filtered.sort((a, b) => {
+    const nameA = (a.nombre || "").toLowerCase();
+    const nameB = (b.nombre || "").toLowerCase();
+    const dateA = a.fechaCreacion || "";
+    const dateB = b.fechaCreacion || "";
+
+    if (currentSortOrder === "NOMBRE_ASC") {
+      return nameA.localeCompare(nameB);
+    } else if (currentSortOrder === "NOMBRE_DESC") {
+      return nameB.localeCompare(nameA);
+    } else if (currentSortOrder === "FECHA_DESC") {
+      return dateB.localeCompare(dateA);
+    } else {
+      // FECHA_ASC por defecto
+      return dateA.localeCompare(dateB);
+    }
+  });
+
+  // 4. Renderizado
   filtered.forEach(r => {
     const tr = document.createElement("tr");
-    tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
+
+    // Verificar si el archivo es repetido (NIT duplicado)
+    const nitClean = (r.nit || "").trim().toLowerCase();
+    const isDuplicate = nitCounts[nitClean] > 1;
+
+    // Resaltar en amarillo claro si está repetido
+    const bgClass = isDuplicate 
+      ? "bg-amber-100 hover:bg-amber-200" 
+      : "hover:bg-slate-50";
+
+    tr.className = `${bgClass} transition border-b border-slate-100`;
 
     const isChecked = selectedRecordIds.has(r.id) ? "checked" : "";
     const badgeState = r.estado === "PENDIENTE" 
       ? `<span class="quick-edit-btn cursor-pointer px-2 py-1 rounded bg-red-100 text-red-700 font-bold text-xs hover:bg-red-200" data-id="${r.id}">PENDIENTE ✏️</span>`
       : `<span class="px-2 py-1 rounded bg-emerald-100 text-emerald-700 font-bold text-xs">${r.estado}</span>`;
 
+    const duplicateBadge = isDuplicate ? `<span class="ml-1 text-xs text-amber-800 font-bold" title="Archivo duplicado">⚠️ Repetido</span>` : "";
+
     tr.innerHTML = `
       <td class="px-4 py-3"><input type="checkbox" class="row-checkbox" data-id="${r.id}" ${isChecked}></td>
       <td class="px-4 py-3 font-mono text-xs text-slate-500">${r.customId || r.id.substring(0,6)}</td>
-      <td class="px-4 py-3 font-semibold text-slate-800">${r.nit}</td>
-      <td class="px-4 py-3 text-slate-700">${r.nombre}</td>
+      <td class="px-4 py-3 font-semibold text-slate-800">${r.nit} ${duplicateBadge}</td>
+      <td class="px-4 py-3 text-slate-700 font-medium">${r.nombre}</td>
       <td class="px-4 py-3 text-xs font-medium text-slate-600">${r.tipo}</td>
       <td class="px-4 py-3 text-xs font-bold text-indigo-900">${r.ubicacion}</td>
       <td class="px-4 py-3">${badgeState}</td>
@@ -254,7 +297,6 @@ document.getElementById("btnSaveQuickEdit").onclick = async () => {
 };
 
 // === EDICIÓN DE DATOS GENERALES DEL CLIENTE ===
-
 const editDataModal = document.getElementById("editDataModal");
 document.getElementById("btnCloseEditData").onclick = () => editDataModal.classList.add("hidden");
 
@@ -266,8 +308,6 @@ function openEditDataModal(id) {
   document.getElementById("editDataNit").value = rec.nit || "";
   document.getElementById("editDataName").value = rec.nombre || "";
   document.getElementById("editDataType").value = rec.tipo || "NORMAL";
-  
-  // Carga la observación actual en el cuadro de texto
   document.getElementById("editDataObs").value = rec.observaciones || "";
   
   editDataModal.classList.remove("hidden");
@@ -286,7 +326,7 @@ document.getElementById("btnSaveDataEdit").onclick = async () => {
     nit: newNit,
     nombre: newName,
     tipo: newType,
-    observaciones: newObs, // Guarda la nueva observación en Firebase
+    observaciones: newObs,
     ultimaModificacion: new Date().toISOString()
   });
 
@@ -330,8 +370,7 @@ document.getElementById("btnDeleteSelected").onclick = async () => {
   document.getElementById("selectAll").checked = false;
 };
 
-// === IMPORTACIÓN DE EXCEL/CSV ROBUSTA ===
-// === IMPORTACIÓN DE EXCEL/CSV (SIN LÍMITE DE REGISTROS Y MAPEO ROBUSTO DE NOMBRES) ===
+// === IMPORTACIÓN DE EXCEL/CSV ===
 document.getElementById("excelInput").onchange = (e) => {
   const file = e.target.files[0];
   if(!file) return;
@@ -350,39 +389,32 @@ document.getElementById("excelInput").onchange = (e) => {
       btnInput.disabled = true;
 
       let totalImportados = 0;
-      const chunkSize = 400; // Divide en bloques de 400 para respetar el límite de Firebase
+      const chunkSize = 400;
 
       for (let i = 0; i < json.length; i += chunkSize) {
         const chunk = json.slice(i, i + chunkSize);
         const batch = writeBatch(db);
 
         for (let row of chunk) {
-          // Buscador inteligente de claves sin importar mayúsculas, minúsculas o espacios
           const keys = Object.keys(row);
           
-          // Buscar columna de NIT
           const nitKey = keys.find(k => k.trim().match(/^(nit|cc|documento|id|nit\/cc)$/i)) || keys[0];
           const nit = String(row[nitKey] || "S/N").trim();
 
-          // Buscar columna de Nombre / Razón Social
           const nameKey = keys.find(k => k.trim().match(/^(nombre|razon social|razón social|cliente|empresa|tercero|nombres)$/i));
           const nombre = nameKey ? String(row[nameKey]).trim() : (row[keys[1]] ? String(row[keys[1]]).trim() : "Sin Nombre");
 
-          // Buscar columna de Tipo
           const tipoKey = keys.find(k => k.trim().match(/^(tipo|expediente|categoria)$/i));
           const tipo = tipoKey && String(row[tipoKey]).trim() ? String(row[tipoKey]).trim().toUpperCase() : "NORMAL";
 
-          // Buscar columna de Ubicación
           const ubiKey = keys.find(k => k.trim().match(/^(ubicacion|ubicación|posicion|destino)$/i));
           const ubicacion = ubiKey && String(row[ubiKey]).trim() ? String(row[ubiKey]).trim().toUpperCase() : "POR ASIGNAR";
 
-          // Estado
           const estadoKey = keys.find(k => k.trim().match(/^(estado|estatus)$/i));
           const estado = estadoKey && String(row[estadoKey]).trim() 
             ? String(row[estadoKey]).trim().toUpperCase() 
             : (ubicacion === "POR ASIGNAR" ? "PENDIENTE" : "GUARDADO");
 
-          // Observaciones
           const obsKey = keys.find(k => k.trim().match(/^(observaciones|observacion|notas|detalle)$/i));
           const obs = obsKey ? String(row[obsKey]).trim() : "";
 
@@ -402,7 +434,6 @@ document.getElementById("excelInput").onchange = (e) => {
           totalImportados++;
         }
 
-        // Guarda el bloque actual en la base de datos
         await batch.commit();
       }
 
@@ -415,8 +446,13 @@ document.getElementById("excelInput").onchange = (e) => {
   reader.readAsArrayBuffer(file);
 };
 
-// === FILTROS DE BÚSQUEDA Y UBICACIÓN ===
+// === FILTROS DE BÚSQUEDA, ORDEN Y UBICACIÓN ===
 document.getElementById("searchInput").oninput = () => renderTable();
+
+document.getElementById("sortOrder").onchange = (e) => {
+  currentSortOrder = e.target.value;
+  renderTable();
+};
 
 document.querySelectorAll(".filter-badge").forEach(btn => {
   btn.onclick = (e) => {
@@ -435,6 +471,8 @@ document.querySelectorAll(".filter-badge").forEach(btn => {
 document.getElementById("btnClearFilters").onclick = () => {
   currentFilterEstado = "TODOS";
   currentFilterUbicacion = "TODOS";
+  currentSortOrder = "FECHA_ASC";
+  document.getElementById("sortOrder").value = "FECHA_ASC";
   document.getElementById("searchInput").value = "";
   document.querySelectorAll(".filter-badge").forEach(b => b.classList.remove("active"));
   document.querySelector('.filter-badge[data-filter-type="estado"][data-filter="TODOS"]').classList.add("active");
