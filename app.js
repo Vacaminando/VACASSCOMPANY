@@ -98,7 +98,7 @@ function renderTable() {
 
     return onlyDigits;
   };
-  // 1. Mapeo de NITs repetidos (ignorando puntos y guiones para que coincidan perfectamente)
+// 1. Mapeo de NITs repetidos (ignorando puntos y guiones para que coincidan perfectamente)
   const nitCounts = {};
   allRecords.forEach(r => {
     const nitClean = cleanString(r.nit);
@@ -110,7 +110,17 @@ function renderTable() {
   // 2. Filtrado
   let filtered = allRecords.filter(r => {
     const matchesSearch = (r.nit || "").toLowerCase().includes(searchVal) || (r.nombre || "").toLowerCase().includes(searchVal);
-    const matchesEstado = currentFilterEstado === "TODOS" || r.estado === currentFilterEstado;
+    
+    let matchesEstado = true;
+    const nitClean = cleanString(r.nit);
+    const isDuplicate = nitCounts[nitClean] > 1;
+
+    if (currentFilterEstado === "REPETIDOS") {
+      matchesEstado = isDuplicate; // Si el filtro es REPETIDOS, solo pasa si es duplicado
+    } else if (currentFilterEstado !== "TODOS") {
+      matchesEstado = r.estado === currentFilterEstado;
+    }
+
     const matchesUbicacion = currentFilterUbicacion === "TODOS" || r.ubicacion === currentFilterUbicacion;
     return matchesSearch && matchesEstado && matchesUbicacion;
   });
