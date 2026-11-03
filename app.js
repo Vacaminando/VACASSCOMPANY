@@ -12,6 +12,12 @@ import {
   orderBy,
   writeBatch
 } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+import { 
+  getAuth, 
+  signInWithEmailAndPassword, 
+  signOut, 
+  onAuthStateChanged 
+} from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
 // === REEMPLAZA ESTAS LLAVES CON LAS TUYAS DE FIREBASE ===
 const firebaseConfig = {
@@ -25,9 +31,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
+const auth = getAuth(app);
 
 enableIndexedDbPersistence(db).catch(err => console.warn("Offline warning:", err.code));
 
+let currentUser = null;
 let allRecords = [];
 let currentFilterEstado = "TODOS";
 let currentFilterUbicacion = "TODOS";
@@ -36,13 +44,51 @@ let activeQuickEditId = null;
 let activeDataEditId = null;
 let selectedRecordIds = new Set();
 
-let wizardData = {
-  tipo: "",
-  estado: "",
-  ubicacion: "",
-  nit: "",
-  nombre: "",
-  observaciones: ""
+// === SISTEMA DE AUTENTICACIÓN (LOGIN/LOGOUT) ===
+onAuthStateChanged(auth, (user) => {
+  currentUser = user;
+  const btnLogin = document.getElementById("btnLoginModal");
+  const btnLogout = document.getElementById("btnLogout");
+  const adminBadge = document.getElementById("adminBadge");
+
+  if (user) {
+    btnLogin.classList.add("hidden");
+    btnLogout.classList.remove("hidden");
+    adminBadge.classList.remove("hidden");
+  } else {
+    btnLogin.classList.remove("hidden");
+    btnLogout.classList.add("hidden");
+    adminBadge.classList.add("hidden");
+  }
+  renderTable();
+});
+
+// Modal Login Events
+const loginModal = document.getElementById("loginModal");
+document.getElementById("btnLoginModal").onclick = () => loginModal.classList.remove("hidden");
+document.getElementById("btnCloseLogin").onclick = () => loginModal.classList.add("hidden");
+
+document.getElementById("btnDoLogin").onclick = async () => {
+  const email = document.getElementById("loginEmail").value.trim();
+  const pass = document.getElementById("loginPassword").value;
+  const loginErr = document.getElementById("loginError");
+
+  try {
+    await signInWithEmailAndPassword(auth, email, pass);
+    loginModal.classList.add("hidden");
+    document.getElementById("loginEmail").value = "";
+    document.getElementById("loginPassword").value = "";
+    loginErr.classList.add("hidden");
+  } catch (err) {
+    loginErr.innerText = "Error: Credenciales incorrectas.";
+    loginErr.classList.remove("hidden");
+  }
+};
+
+document.getElementById("btnLogout").onclick = () => {
+  if (confirm("¿Cerrar sesión de Administrador?")) {
+    signOut(auth);
+  }
 };
 
 // Cargar registros ordenados por fecha de creación por defecto
@@ -60,45 +106,14 @@ function renderTable() {
   const searchVal = document.getElementById("searchInput").value.toLowerCase();
   tbody.innerHTML = "";
 
-  // Función auxiliar para limpiar puntos, comas, guiones, espacios y tildes al comparar/ordenar
   const cleanString = (str) => {
     return (str || "")
       .toString()
       .toLowerCase()
-      .normalize("NFD").replace(/[\u0300-\u036f]/g, "") // Remueve tildes (á -> a, é -> e)
-      .replace(/[^a-z0-9]/g, ""); // Remueve TODO lo que no sea letra o número (puntos, comas, espacios, etc.)
+      .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]/g, "");
   };
-// Limpieza inteligente para NITs pegados sin guión
-  const cleanNit = (nit) => {
-    if (!nit) return "";
-    let str = nit.toString().trim();
-    
-    // Si por alguna razón viniera con guión, tomar lo que está antes del guión
-    if (str.includes("-")) {
-      str = str.split("-")[0];
-    }
-    
-    // Dejar únicamente dígitos
-    const onlyDigits = str.replace(/\D/g, "");
 
-    // 1. NIT de empresa con DV pegado (10 dígitos: ej. 9001234561 -> 900123456)
-    if (onlyDigits.length === 10) {
-      return onlyDigits.substring(0, 9);
-    }
-
-    // 2. Cédula/NIT antiguo con DV pegado (9 dígitos de los cuales el último es DV -> 8 dígitos base)
-    // O NIT de empresa sin DV de 9 dígitos (ej. 900123456)
-    // Nota: Si el NIT tiene 9 dígitos y empieza por 8 o 9 (NITs de empresas Dian), son los 9 dígitos completos.
-    if (onlyDigits.length === 9) {
-      if (onlyDigits.startsWith("8") || onlyDigits.startsWith("9")) {
-        return onlyDigits; // Es un NIT base de empresa completo de 9 dígitos
-      }
-      return onlyDigits.substring(0, 8); // Es una cédula/NIT persona natural con DV al final
-    }
-
-    return onlyDigits;
-  };
-// 1. Mapeo de NITs repetidos (ignorando puntos y guiones para que coincidan perfectamente)
   const nitCounts = {};
   allRecords.forEach(r => {
     const nitClean = cleanString(r.nit);
@@ -107,16 +122,14 @@ function renderTable() {
     }
   });
 
-  // 2. Filtrado
   let filtered = allRecords.filter(r => {
     const matchesSearch = (r.nit || "").toLowerCase().includes(searchVal) || (r.nombre || "").toLowerCase().includes(searchVal);
-    
     let matchesEstado = true;
     const nitClean = cleanString(r.nit);
     const isDuplicate = nitCounts[nitClean] > 1;
 
     if (currentFilterEstado === "REPETIDOS") {
-      matchesEstado = isDuplicate; // Si el filtro es REPETIDOS, solo pasa si es duplicado
+      matchesEstado = isDuplicate;
     } else if (currentFilterEstado !== "TODOS") {
       matchesEstado = r.estado === currentFilterEstado;
     }
@@ -125,37 +138,23 @@ function renderTable() {
     return matchesSearch && matchesEstado && matchesUbicacion;
   });
 
-  // 3. Ordenamiento alfabético inteligente (sin considerar puntos al comparar)
   filtered.sort((a, b) => {
     const nameA = cleanString(a.nombre);
     const nameB = cleanString(b.nombre);
     const dateA = a.fechaCreacion || "";
     const dateB = b.fechaCreacion || "";
 
-    if (currentSortOrder === "NOMBRE_ASC") {
-      return nameA.localeCompare(nameB);
-    } else if (currentSortOrder === "NOMBRE_DESC") {
-      return nameB.localeCompare(nameA);
-    } else if (currentSortOrder === "FECHA_DESC") {
-      return dateB.localeCompare(dateA);
-    } else {
-      // FECHA_ASC por defecto
-      return dateA.localeCompare(dateB);
-    }
+    if (currentSortOrder === "NOMBRE_ASC") return nameA.localeCompare(nameB);
+    if (currentSortOrder === "NOMBRE_DESC") return nameB.localeCompare(nameA);
+    if (currentSortOrder === "FECHA_DESC") return dateB.localeCompare(dateA);
+    return dateA.localeCompare(dateB);
   });
 
-  // 4. Renderizado
   filtered.forEach(r => {
     const tr = document.createElement("tr");
-
-    // Verificar si el archivo es repetido evaluando el NIT limpio
     const nitClean = cleanString(r.nit);
     const isDuplicate = nitCounts[nitClean] > 1;
-
-    // Resaltar en amarillo claro si está repetido
-    const bgClass = isDuplicate 
-      ? "bg-amber-100 hover:bg-amber-200" 
-      : "hover:bg-slate-50";
+    const bgClass = isDuplicate ? "bg-amber-100 hover:bg-amber-200" : "hover:bg-slate-50";
 
     tr.className = `${bgClass} transition border-b border-slate-100`;
 
@@ -165,6 +164,11 @@ function renderTable() {
       : `<span class="px-2 py-1 rounded bg-emerald-100 text-emerald-700 font-bold text-xs">${r.estado}</span>`;
 
     const duplicateBadge = isDuplicate ? `<span class="ml-1 text-xs text-amber-800 font-bold" title="Archivo duplicado">⚠️ Repetido</span>` : "";
+
+    // El botón de borrar solo es visible si hay un administrador logueado
+    const deleteBtnHTML = currentUser 
+      ? `<button class="delete-single-btn text-rose-600 hover:text-rose-900 font-bold text-xs" data-id="${r.id}" title="Borrar">🗑️</button>` 
+      : `<span class="text-xs text-slate-300" title="Requiere inicio de sesión de admin">🔒</span>`;
 
     tr.innerHTML = `
       <td class="px-4 py-3"><input type="checkbox" class="row-checkbox" data-id="${r.id}" ${isChecked}></td>
@@ -177,7 +181,7 @@ function renderTable() {
       <td class="px-4 py-3 text-xs text-slate-500">${r.observaciones || "-"}</td>
       <td class="px-4 py-3 text-right space-x-2">
         <button class="edit-data-btn text-indigo-600 hover:text-indigo-900 font-bold text-xs" data-id="${r.id}" title="Editar cliente">✏️ Editar</button>
-        <button class="delete-single-btn text-rose-600 hover:text-rose-900 font-bold text-xs" data-id="${r.id}" title="Borrar">🗑️</button>
+        ${deleteBtnHTML}
       </td>
     `;
     tbody.appendChild(tr);
@@ -185,7 +189,6 @@ function renderTable() {
 
   updateSelectedUI();
 
-  // Eventos de la tabla
   document.querySelectorAll(".quick-edit-btn").forEach(btn => {
     btn.onclick = (e) => openQuickEdit(e.target.getAttribute("data-id"));
   });
@@ -208,7 +211,9 @@ function renderTable() {
   });
 }
 
-// === LIMPIEZA DEL FORMULARIO WIZARD ===
+// === WIZARD Y MODALES IGUALES ===
+let wizardData = { tipo: "", estado: "", ubicacion: "", nit: "", nombre: "", observaciones: "" };
+
 function resetWizardForm() {
   wizardData = { tipo: "", estado: "", ubicacion: "", nit: "", nombre: "", observaciones: "" };
   document.getElementById("wizardNit").value = "";
@@ -218,7 +223,6 @@ function resetWizardForm() {
   showStep(1);
 }
 
-// === WIZARD (FORMULARIO POR PASOS) ===
 const wizardModal = document.getElementById("wizardModal");
 const step1 = document.getElementById("step1");
 const step2 = document.getElementById("step2");
@@ -381,11 +385,16 @@ document.getElementById("btnSaveDataEdit").onclick = async () => {
   editDataModal.classList.add("hidden");
 };
 
-// === BORRADO UNITARIO Y MASIVO ===
+// === BORRADO UNITARIO Y MASIVO CON PROTECCIÓN ===
 async function deleteSingleRecord(id) {
-  if(confirm("¿Estás seguro de eliminar este registro?")) {
-    await deleteDoc(doc(db, "expedientes", id));
-    selectedRecordIds.delete(id);
+  if (!currentUser) return alert("Debes iniciar sesión como administrador para eliminar registros.");
+  if (confirm("¿Estás seguro de eliminar este registro?")) {
+    try {
+      await deleteDoc(doc(db, "expedientes", id));
+      selectedRecordIds.delete(id);
+    } catch(err) {
+      alert("Error al eliminar: " + err.message);
+    }
   }
 }
 
@@ -402,23 +411,34 @@ function updateSelectedUI() {
   const btnDelete = document.getElementById("btnDeleteSelected");
   const countSpan = document.getElementById("selectedCount");
   countSpan.innerText = selectedRecordIds.size;
-  btnDelete.classList.toggle("hidden", selectedRecordIds.size === 0);
+
+  // Solo mostrar el botón de borrado masivo si está logueado el admin y hay items seleccionados
+  if (currentUser && selectedRecordIds.size > 0) {
+    btnDelete.classList.remove("hidden");
+  } else {
+    btnDelete.classList.add("hidden");
+  }
 }
 
 document.getElementById("btnDeleteSelected").onclick = async () => {
-  if(!confirm(`¿Deseas borrar permanentemente los ${selectedRecordIds.size} registros seleccionados?`)) return;
+  if (!currentUser) return alert("Debes iniciar sesión como administrador para eliminar registros.");
+  if (!confirm(`¿Deseas borrar permanentemente los ${selectedRecordIds.size} registros seleccionados?`)) return;
 
-  const batch = writeBatch(db);
-  selectedRecordIds.forEach(id => {
-    batch.delete(doc(db, "expedientes", id));
-  });
+  try {
+    const batch = writeBatch(db);
+    selectedRecordIds.forEach(id => {
+      batch.delete(doc(db, "expedientes", id));
+    });
 
-  await batch.commit();
-  selectedRecordIds.clear();
-  document.getElementById("selectAll").checked = false;
+    await batch.commit();
+    selectedRecordIds.clear();
+    document.getElementById("selectAll").checked = false;
+  } catch(err) {
+    alert("Error en borrado masivo: " + err.message);
+  }
 };
 
-// === IMPORTACIÓN DE EXCEL/CSV ===
+// === IMPORTACIÓN DE EXCEL/CSV Y OTROS EVENTOS ===
 document.getElementById("excelInput").onchange = (e) => {
   const file = e.target.files[0];
   if(!file) return;
@@ -445,7 +465,6 @@ document.getElementById("excelInput").onchange = (e) => {
 
         for (let row of chunk) {
           const keys = Object.keys(row);
-          
           const nitKey = keys.find(k => k.trim().match(/^(nit|cc|documento|id|nit\/cc)$/i)) || keys[0];
           const nit = String(row[nitKey] || "S/N").trim();
 
@@ -494,7 +513,6 @@ document.getElementById("excelInput").onchange = (e) => {
   reader.readAsArrayBuffer(file);
 };
 
-// === FILTROS DE BÚSQUEDA, ORDEN Y UBICACIÓN ===
 document.getElementById("searchInput").oninput = () => renderTable();
 
 document.getElementById("sortOrder").onchange = (e) => {
@@ -527,7 +545,6 @@ document.getElementById("btnClearFilters").onclick = () => {
   renderTable();
 };
 
-// === EXPORTAR PDF ===
 document.getElementById("btnExportPDF").onclick = () => {
   const element = document.getElementById("pdfContent");
   html2pdf().from(element).save("reporte-documental.pdf");
